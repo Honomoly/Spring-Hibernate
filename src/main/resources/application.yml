@@ -1,0 +1,15 @@
+spring:
+    application:
+        name: hibernate
+
+    datasource:
+        driver-class-name: com.mysql.cj.jdbc.Driver
+        url: ${DATABASE_URL}
+        username: ${DATABASE_USERNAME}
+        password: ${DATABASE_PASSWORD}
+
+    jpa:
+        hibernate:
+            ddl-auto: ${DATABASE_DDL_OPTION:none}
+        show-sql: true
+
