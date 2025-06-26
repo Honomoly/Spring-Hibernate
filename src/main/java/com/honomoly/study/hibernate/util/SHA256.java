@@ -7,6 +7,8 @@ import java.util.Arrays;
 
 public class SHA256 {
 
+    private SHA256() {}
+
     /**
      * 매 실행시에 새로운 다이제스트 객체 생성
      * @return MessageDigest

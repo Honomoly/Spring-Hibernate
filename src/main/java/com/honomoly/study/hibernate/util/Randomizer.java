@@ -4,6 +4,8 @@ import java.security.SecureRandom;
 
 public class Randomizer {
 
+    private Randomizer() {}
+
     private static final SecureRandom RANDOM = new SecureRandom();
 
     public static byte[] getRandomBytes(int length) {

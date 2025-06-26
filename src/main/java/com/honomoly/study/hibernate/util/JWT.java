@@ -23,6 +23,8 @@ import io.jsonwebtoken.security.InvalidKeyException;
 
 public class JWT {
 
+    private JWT() {}
+
     private static final long KEY_LIFETIME = TimeUnit.DAYS.toMillis(31); // 키 수명은 31일
 
     private static final JwtParser unsafeParser = Jwts.parser().build(); // 검증 없이 파싱만 하는 용도
