@@ -1,6 +1,7 @@
 package com.honomoly.study.hibernate.util;
 
 import java.io.IOException;
+import java.security.Key;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Date;
@@ -12,34 +13,46 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.honomoly.study.hibernate.domain.entity.User;
 
 import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jwt;
+import io.jsonwebtoken.Header;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.Locator;
+import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.InvalidKeyException;
 
 public class JWT {
 
     private JWT() {}
 
-    private static final long KEY_LIFETIME = TimeUnit.DAYS.toMillis(31); // 키 수명은 31일
-
-    private static final JwtParser unsafeParser = Jwts.parser().build(); // 검증 없이 파싱만 하는 용도
-
-    private static final Map<String, JWTCache> cacheMap = new ConcurrentHashMap<>();
-
-    private static volatile JWTCache activatedJWTCache;
-
-    /** 토큰 발급을 위한 키값과 검증을 위한 파서 객체를 캐싱하기 위한 클래스 */
-    public record JWTCache(
+    /** 토큰 발급을 위한 키값을 캐싱하기 위한 클래스 */
+    public record KeyCache(
         String id,
         SecretKey key,
-        JwtParser parser,
         long expireMillis
     ) {}
+
+    private static final long KEY_CACHE_LIFETIME = TimeUnit.DAYS.toMillis(31); // 키 수명은 31일
+
+    private static final Map<String, KeyCache> keyCacheMap = new ConcurrentHashMap<>();
+    
+    private static final JwtParser jwtParser = Jwts.parser()
+            .keyLocator(new Locator<Key>() {
+                @Override
+                public Key locate(Header header) {
+                    if (header.get("kid") instanceof String kid) {
+                        KeyCache keyCache = keyCacheMap.get(kid);
+                        if (keyCache != null)
+                            return keyCache.key();
+                    }
+                    throw new UnsupportedJwtException("Invalid token header - kid");
+                }
+            })
+            .build();
+
+    private static volatile KeyCache activatedKeyCache;
 
     /**
      * 새로운 키 발급 및 만료된 키값 제거
@@ -49,7 +62,7 @@ public class JWT {
         final long now = System.currentTimeMillis();
 
         // 1. 만료된 키값 제거
-        cacheMap.entrySet().removeIf(e -> e.getValue().expireMillis() < now);
+        keyCacheMap.entrySet().removeIf(e -> e.getValue().expireMillis() < now);
 
         // 2. 새 키 발급
         // 무작위로 생성된 41바이트중 9바이트는 키ID, 32바이트는 비밀키 생성에 할당 
@@ -64,18 +77,15 @@ public class JWT {
         String newKeyId = Base64.getUrlEncoder().encodeToString(keyIdBytes);
         SecretKey newSecretKey = new SecretKeySpec(secretKeyBytes, "HmacSHA256");
 
-        JwtParser newParser = Jwts.parser().verifyWith(newSecretKey).build();
-
-        JWTCache newPack = new JWTCache(
+        KeyCache newPack = new KeyCache(
             newKeyId,
             newSecretKey,
-            newParser,
-            now + KEY_LIFETIME
+            now + KEY_CACHE_LIFETIME
         );
 
-        cacheMap.put(newKeyId, newPack);
+        keyCacheMap.put(newKeyId, newPack);
 
-        activatedJWTCache = newPack;
+        activatedKeyCache = newPack;
         
     }
 
@@ -84,10 +94,10 @@ public class JWT {
      * @param user
      * @return
      */
-    public static String generateJWT(User user) {
+    public static String generateJWT(long userId) {
 
         final Instant now = Instant.now();
-        final JWTCache cache = activatedJWTCache;
+        final KeyCache cache = activatedKeyCache;
 
         try {
             return Jwts.builder()
@@ -98,7 +108,7 @@ public class JWT {
                     .subject("user-login")
                     .issuedAt(Date.from(now))
                     .expiration(Date.from(now.plusMillis(TimeUnit.HOURS.toMillis(2))))
-                    .claim("userId", user.getId()) // 유저ID 추가
+                    .claim("userId", userId) // 유저ID 추가
                     .signWith(cache.key()) // 서명
                     .compact(); // 생성
         } catch (InvalidKeyException e) {
@@ -114,22 +124,8 @@ public class JWT {
      * @throws JwtException : 토큰 검증 실패시
      */
     public static long verifyJwt(String token) {
-
-        Object kidObj = unsafeParser.parse(token).getHeader().get("kid");
-
-        if (kidObj == null)
-            throw new JwtException("Missing token value - kid");
-
-        JWTCache jWTCache = cacheMap.get(kidObj.toString());
-
-        if (jWTCache == null)
-            throw new JwtException("Invalid token value - kid");
-
-        Jwt<?, ?> parsed = jWTCache.parser().parse(token);
-
-        return switch (parsed.getPayload()) {
+        return switch (jwtParser.parse(token).getPayload()) {
             case byte[] bytes -> { // 바이너리 데이터인 경우, 수동 파싱 시도
-                System.out.println("Custom Parser Running!");
                 long userId;
 
                 try {
@@ -140,14 +136,13 @@ public class JWT {
                 }
 
                 if (userId == -1)
-                    throw new JwtException("Token Parsing Error - userId");
+                    throw new UnsupportedJwtException("Missing token value - userId");
 
                 yield userId;
             }
             case Claims claims -> claims.get("userId", Long.class);
-            default -> throw new JwtException("Missing token value - userId");
+            default -> throw new JwtException("Unknown Error");
         };
-
     }
 
 }

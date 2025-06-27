@@ -33,7 +33,7 @@ public class AuthController {
 
     @PostMapping("/sign-up")
     public ResponseEntity<AuthResponse> signUp(@RequestBody @Valid SignUpRequest request) {
-        try {
+        try { // 타임존 검증
             ZoneId.of(request.getTimezone());
         } catch (Exception e) {
             throw new HttpException(HttpStatus.BAD_REQUEST, "Invalid timezone '" + request.getTimezone() + "'");
